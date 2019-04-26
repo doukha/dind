@@ -1,0 +1,76 @@
+image: docker:stable
+
+stages:
+  - unit_test
+  - build
+  - deploy
+
+variables:
+  DOCKER_DRIVER: overlay2
+services:
+  - docker:dind
+before_script:
+  - docker info
+
+
+.get-version-settings:
+  - &get-version-from-settings
+      export SETTINGS_VERSION=$(grep -m 1 '<version>' ./parametrages/pom.xml | awk -F '>' '{ print $2 }' | awk -F '<' '{ print $1 }')
+
+
+test-settings:
+  stage: unit_test
+  coverage: '/^All files\s+\|\s+\d+\.*\d*\s+\|\s*(\d+\.*\d*)/'
+  script:
+    - docker build --no-cache -f parametrages/docker/Dockerfile --target=tester -t settings:test-$CI_JOB_ID parametrages
+    - docker run --rm settings:test-$CI_JOB_ID
+  after_script:
+    - docker rmi -f settings:test-$CI_JOB_ID
+  only:
+    refs:
+      - branches
+      - develop
+      - master
+    changes:
+      - parametrages/**/**
+  tags:
+    - puma
+
+build-settings:
+  stage: build
+  before_script:
+    - *get-version-from-settings
+  script:
+    - docker build --no-cache -f parametrages/docker/Dockerfile --target=runner -t ecr_repo:settings-$SETTINGS_VERSION parametrages
+    - echo "PUSH READY IMAGE in registry or use image in the next section"
+  #    - docker push ecr_repo:settings-$SETTINGS_VERSION
+  only:
+    refs:
+      - develop
+      - master
+    changes:
+      - parametrages/**/**
+  tags:
+    - puma
+
+deploy-settings:
+  stage: deploy
+  environment:
+    name: settings-deployment
+  before_script:
+    - *get-version-from-settings
+  script:
+    - docker ps
+    - docker image ls
+    - echo "get AWS Credential to push jar in lambda or AWS lambda is triggered to fetch uploaded jar in registry"
+  after_script:
+    - echo "delete ( clean ) deployed jar "
+    # - docker rmi -f frontend:test-$CI_JOB_ID
+  only:
+    refs:
+      - develop
+      - master
+    changes:
+      - parametrages/**/**
+  tags:
+    - puma
